@@ -41,12 +41,29 @@ def run(cmd: list[str], check: bool = True, quiet: bool = False) -> subprocess.C
     return proc
 
 
+def resolve_suno_short_url(url: str) -> str:
+    request = urllib.request.Request(url, method="HEAD", headers={"user-agent": "qiaomu-music-publisher/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.geturl()
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            location = exc.headers.get("Location")
+            if location:
+                return urllib.parse.urljoin(url, location)
+        raise SystemExit(f"Could not resolve Suno short link ({exc.code}): {url}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"Could not resolve Suno short link: {url} ({exc})") from exc
+
+
 def normalize_ids(values: list[str]) -> list[str]:
     ids: list[str] = []
     for value in values:
         for part in re.split(r"[\s,]+", value.strip()):
             if not part:
                 continue
+            if re.match(r"^https?://([^/]+\.)?suno\.com/s/[^/?#]+", part):
+                part = resolve_suno_short_url(part)
             match = re.search(
                 r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
                 part,

@@ -36,7 +36,8 @@ Do not use it for pure Suno lyric writing or music generation. Use
 
 ## Inputs
 
-- `suno_ids_or_urls`: one or more Suno clip IDs or `https://suno.com/song/<id>`
+- `suno_ids_or_urls`: one or more Suno clip IDs, `https://suno.com/song/<id>`
+  URLs, or `https://suno.com/s/<share>` short links
 - `output_dir`: local asset directory; default `~/Documents/Suno/QiaomuMusicPublisher`
 - `base_url`: from `QIAOMU_MUSIC_BASE_URL` unless user gives another instance
 - `admin_password`: from `QIAOMU_MUSIC_ADMIN_PASSWORD` or `ADMIN_PASSWORD`
@@ -47,7 +48,9 @@ Do not use it for pure Suno lyric writing or music generation. Use
 
 ## Workflow
 
-1. Normalize Suno URLs to clip IDs.
+1. Normalize Suno URLs to clip IDs. Follow `https://suno.com/s/<share>` short
+   links to their final `https://suno.com/song/<id>?sh=...` destination before
+   extracting the ID.
 2. If MP3/LRC are not already present, call Suno Master's downloader:
 
 ```bash

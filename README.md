@@ -23,9 +23,16 @@ python3 scripts/publish_suno_to_qiaomu_music.py \
   --output-dir ~/Documents/Suno/QiaomuMusicPublisher
 ```
 
+Short share links are supported and resolved automatically:
+
+```bash
+python3 scripts/publish_suno_to_qiaomu_music.py \
+  --ids "https://suno.com/s/X12WW1xRcI5PylVv"
+```
+
 The script will:
 
-1. normalize Suno URLs/IDs
+1. normalize Suno URLs/IDs, including `suno.com/s/<share>` redirects
 2. call `qiaomu-suno-master/scripts/download_clips.sh`
 3. require timestamped `.lrc`
 4. download Suno cover art from `suno info`
