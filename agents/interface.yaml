@@ -1,0 +1,37 @@
+name: qiaomu-music-publisher
+version: 0.1.0
+description: Publish Suno MP3, LRC, and cover assets to Qiaomu Music Player Web.
+inputs:
+  - name: suno_ids_or_urls
+    type: string[]
+    required: true
+    description: Suno clip IDs or https://suno.com/song/<id> URLs.
+  - name: output_dir
+    type: string
+    required: false
+    description: Local directory for downloaded or existing MP3/LRC/cover assets.
+  - name: qiaomu_music_base_url
+    type: string
+    required: false
+    env: QIAOMU_MUSIC_BASE_URL
+    description: Qiaomu Music site base URL.
+  - name: qiaomu_music_admin_password
+    type: secret
+    required: true
+    env: QIAOMU_MUSIC_ADMIN_PASSWORD
+    description: Admin password used only at runtime.
+outputs:
+  - name: upload_result_json
+    type: json
+    description: Uploaded track metadata returned by Qiaomu Music.
+capabilities:
+  - Normalize Suno song URLs and IDs.
+  - Delegate MP3/LRC download and validation to qiaomu-suno-master.
+  - Download Suno source cover when no cover is provided.
+  - Login to Qiaomu Music admin API.
+  - Upload audio, LRC lyrics, cover art, and metadata.
+boundaries:
+  - Do not generate Suno songs.
+  - Do not store admin passwords or cookies.
+  - Do not use legacy /api/upload except for explicit debugging.
+  - Do not hardcode production domains.
