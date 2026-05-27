@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -22,16 +23,22 @@ from typing import Any
 DEFAULT_BASE_URL = "http://127.0.0.1:3068"
 DEFAULT_OUTPUT_DIR = Path.home() / "Documents" / "Suno" / "QiaomuMusicPublisher"
 SUNO_MASTER = Path.home() / ".agents" / "skills" / "qiaomu-suno-master"
+QIAOMU_IMAGE_GENERATOR = Path.home() / ".agents" / "skills" / "qiaomu-image-generator"
 
 
 def log(message: str) -> None:
     print(message, file=sys.stderr)
 
 
-def run(cmd: list[str], check: bool = True, quiet: bool = False) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str],
+    check: bool = True,
+    quiet: bool = False,
+    timeout: int | None = None,
+) -> subprocess.CompletedProcess[str]:
     if not quiet:
         log("$ " + " ".join(cmd))
-    proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=timeout)
     if proc.stdout and not quiet:
         print(proc.stdout, end="")
     if proc.stderr and not quiet:
@@ -138,6 +145,104 @@ def validate_lrc(path: Path) -> None:
     text = path.read_text(encoding="utf-8", errors="replace")
     if not re.search(r"^\[\d{2}:\d{2}\.\d{2}\].+", text, re.M):
         raise SystemExit(f"LRC does not contain timestamped lyric lines: {path}")
+
+
+def lyric_excerpt(lrc: Path, max_lines: int = 12) -> str:
+    text = lrc.read_text(encoding="utf-8", errors="replace")
+    lines: list[str] = []
+    for line in text.splitlines():
+        cleaned = re.sub(r"^\[[^\]]+\]\s*", "", line).strip()
+        if not cleaned or cleaned.startswith("["):
+            continue
+        lines.append(cleaned)
+        if len(lines) >= max_lines:
+            break
+    return " / ".join(lines)
+
+
+def cover_description(title: str, lrc: Path) -> str:
+    excerpt = lyric_excerpt(lrc)
+    theme = f"歌曲《{title}》"
+    if excerpt:
+        theme += f"，歌词意向：{excerpt}"
+    return (
+        f"{theme}。提炼成一个强记忆点的专辑封面：中心单一视觉符号，"
+        "用抽象物件、轮廓、光源或空间关系表达情绪；有限色板 3 到 5 色，"
+        "复古丝网印刷质感，正方形构图，周围留白，强缩略图辨识度。"
+        "不要文字、不要字母、不要数字、不要 logo、不要歌名。"
+    )
+
+
+def generate_qiaomu_cover(
+    *,
+    title: str,
+    clip_id: str,
+    lrc: Path,
+    output_dir: Path,
+    provider: str,
+    timeout: int,
+) -> Path | None:
+    script = QIAOMU_IMAGE_GENERATOR / "scripts" / "generate.py"
+    if not script.exists():
+        log(f"Qiaomu image generator not found, will use Suno cover fallback: {script}")
+        return None
+
+    cover_name = f"{safe_name(title)}-{clip_id[:8]}-qiaomu-cover.png"
+    config_path = output_dir / f"{safe_name(title)}-{clip_id[:8]}-cover.visual.json"
+    result_path = output_dir / f"{safe_name(title)}-{clip_id[:8]}-cover.result.json"
+    cover_path = output_dir / cover_name
+    if cover_path.exists() and cover_path.stat().st_size > 0:
+        return cover_path
+
+    config = {
+        "task_id": f"qiaomu_music_cover_{clip_id[:8]}",
+        "template": "album_cover",
+        "output_dir": str(output_dir),
+        "cover": {
+            "enabled": True,
+            "filename": cover_name,
+            "style": "album-mondo-cover",
+            "aspect_ratio": "1:1",
+            "description": cover_description(title, lrc),
+            "retry_count": 1,
+        },
+        "defaults": {
+            "style": "album-mondo-cover",
+            "aspect_ratio": "1:1",
+            "provider": provider,
+            "retry_count": 1,
+        },
+    }
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    log(f"Generating Qiaomu album cover for {title} ({clip_id})...")
+    try:
+        proc = run(
+            ["python3", str(script), str(config_path), "--workers", "1", "--no-insert", "--output", str(result_path)],
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        log(f"Qiaomu cover generation timed out after {timeout}s; will use Suno cover fallback.")
+        return None
+
+    if proc.returncode != 0:
+        log("Qiaomu cover generation failed; will use Suno cover fallback.")
+        return None
+
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        generated = result.get("cover", {}).get("path")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        generated = None
+    candidate = Path(generated) if generated else cover_path
+    if candidate.exists() and candidate.stat().st_size > 0:
+        if candidate != cover_path:
+            shutil.copyfile(candidate, cover_path)
+        return cover_path
+
+    log("Qiaomu cover generation did not produce an image; will use Suno cover fallback.")
+    return None
 
 
 def ensure_suno_assets(ids: list[str], output_dir: Path, download: bool) -> None:
@@ -280,6 +385,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--draft", action="store_true", help="Upload as unpublished draft")
     parser.add_argument("--no-download", action="store_true", help="Use existing local files only")
     parser.add_argument("--cover", type=Path, help="Use one explicit cover for all tracks")
+    parser.add_argument("--no-generated-cover", action="store_true", help="Skip Qiaomu generated cover and use explicit/Suno cover")
+    parser.add_argument("--cover-provider", default="jimeng", choices=["jimeng", "z-image"], help="Generated cover provider")
+    parser.add_argument("--cover-timeout", type=int, default=240, help="Generated cover timeout in seconds")
     parser.add_argument("--json-out", type=Path, help="Write upload results JSON")
     return parser.parse_args()
 
@@ -303,15 +411,28 @@ def main() -> int:
         title = clip_title(info, clip_id)
         audio = find_asset(output_dir, clip_id, (".mp3", ".mpeg", ".m4a", ".wav"))
         lrc = find_asset(output_dir, clip_id, (".lrc",))
-        cover = args.cover.expanduser().resolve() if args.cover else download_suno_cover(info, clip_id, output_dir)
-
         if audio is None:
             raise SystemExit(f"Missing audio for {clip_id} in {output_dir}")
         if lrc is None:
             raise SystemExit(f"Missing LRC for {clip_id} in {output_dir}")
+        validate_lrc(lrc)
+
+        if args.cover:
+            cover = args.cover.expanduser().resolve()
+        elif args.no_generated_cover:
+            cover = download_suno_cover(info, clip_id, output_dir)
+        else:
+            cover = generate_qiaomu_cover(
+                title=title,
+                clip_id=clip_id,
+                lrc=lrc,
+                output_dir=output_dir,
+                provider=args.cover_provider,
+                timeout=args.cover_timeout,
+            ) or download_suno_cover(info, clip_id, output_dir)
+
         if cover is None or not cover.exists():
             raise SystemExit(f"Missing cover for {clip_id}; pass --cover or ensure suno info has image_url.")
-        validate_lrc(lrc)
 
         log(f"Uploading {title} ({clip_id}) to {args.base_url}...")
         track = upload_track(

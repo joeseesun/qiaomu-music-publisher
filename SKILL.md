@@ -59,13 +59,22 @@ bash ~/.agents/skills/qiaomu-suno-master/scripts/download_clips.sh \
   --lyrics --lyrics-format lrc --require-lrc
 ```
 
-3. Download the Suno source cover from `suno info --json <id>` if no explicit
-   cover is provided. If the user asks for a generated乔木 cover, call
-   `qiaomu-image-generator` before publishing and pass that cover path.
+3. Generate a Qiaomu album cover by default before publishing:
+   - Use `qiaomu-image-generator` with template `album_cover`, style
+     `album-mondo-cover`, aspect ratio `1:1`.
+   - Build the visual description from the track title plus the timestamped LRC:
+     extract lyric imagery, compress it into one strong visual symbol, prefer
+     negative space / single focus / limited palette, and explicitly request no
+     text, letters, numbers, logos, or song title in the image.
+   - Save `*-cover.visual.json`, `*-cover.result.json`, and
+     `*-qiaomu-cover.png` in the output directory.
+   - Only use the Suno source cover as a last-resort fallback when generated
+     cover creation fails, times out, or the caller passes `--no-generated-cover`.
+   - If the caller passes `--cover`, use that explicit cover.
 4. Validate that each track has:
    - one MP3 file
    - one timestamped `.lrc`
-   - one cover image
+   - one cover image, preferably `*-qiaomu-cover.png`
 5. Login to Qiaomu Music with `POST /api/login`.
 6. Upload each track with `POST /api/admin/tracks` multipart fields:
    - `title`
@@ -84,6 +93,22 @@ bash ~/.agents/skills/qiaomu-suno-master/scripts/download_clips.sh \
 python3 scripts/publish_suno_to_qiaomu_music.py \
   --ids "ID1 ID2" \
   --output-dir "$OUTPUT_DIR"
+```
+
+Generated covers are enabled by default. Useful cover controls:
+
+```bash
+python3 scripts/publish_suno_to_qiaomu_music.py \
+  --ids "ID1" \
+  --output-dir "$OUTPUT_DIR" \
+  --cover-provider jimeng \
+  --cover-timeout 240
+
+# Last-resort mode only: skip Qiaomu cover generation and use Suno cover.
+python3 scripts/publish_suno_to_qiaomu_music.py \
+  --ids "ID1" \
+  --output-dir "$OUTPUT_DIR" \
+  --no-generated-cover
 ```
 
 For an explicit site:
@@ -111,6 +136,7 @@ Return a concise summary:
 
 - uploaded track title and ID
 - MP3/LRC/cover local paths
+- whether the cover is a generated Qiaomu cover or a Suno fallback
 - Qiaomu Music base URL
 - whether the track is published
 - any failed ID with the exact error
